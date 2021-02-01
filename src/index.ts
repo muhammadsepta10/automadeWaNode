@@ -6,21 +6,24 @@ import * as expresWinston from "express-winston"
 import * as winstonOpt from "./config/winston"
 import routes from "./routes";
 dotenv.config()
-const whitelist = ['http://example1.com', 'http://example2.com']
-const corsOptions = {
-    origin: function (origin: any, callback: any) {
-        if (whitelist.indexOf(origin) !== -1) {
-            callback(null, true)
-        } else {
-            callback(new Error('Not allowed by CORS'))
-        }
-    },
-}
+var allowedOrigins = [`http://localhost:${process.env.PORT}`];
 const app = express()
 const port = process.env.PORT
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(cors())
+app.use(cors({
+    origin: function (origin, callback) {
+        // allow requests with no origin 
+        // (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            var msg = 'The CORS policy for this site does not ' +
+                'allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    }
+}));
 app.use(expresWinston.logger(winstonOpt.combineOpt))
 app.use("/", routes)
 app.use(expresWinston.errorLogger(winstonOpt.errorOpt))
