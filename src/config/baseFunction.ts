@@ -2,7 +2,7 @@ import connection from "../config/db"
 import moment from "moment"
 
 export const query = (sql: any, args: any) => {
-    return new Promise((resolve, reject) => {
+    return new Promise<any>((resolve, reject) => {
         connection.query(sql, args, (err: any, rows: any) => {
             if (err) {
                 return reject(err);
