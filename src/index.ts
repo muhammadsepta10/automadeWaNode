@@ -1,47 +1,106 @@
-import { create, Client, ChatId } from '@open-wa/wa-automate';
+import { create, Client, ChatId, Message, MessageId, decryptMedia } from '@open-wa/wa-automate';
 import { extraLog } from './config/winston';
 import PQueue from "p-queue"
 import { validateRequestQuery } from './config/baseFunction';
 import moment from 'moment';
 import axios from './config/axios';
+import appRoot from "app-root-path"
+import fs from "fs"
+import path from "path"
+const mime = require("mime-types")
 let userId = ""
 let timeout = 0
 const queue = new PQueue({
     concurrency: 1,
 });
 
-const queueSend = new PQueue({
-    concurrency: 1,
-})
+const writeFileSyncRecursive = (filename: string, content: any) => {
+    return new Promise((resolve, reject) => {
+        try {
+            let filepath = filename.replace(/\\/g, '/');
+            let root = '';
+            if (filepath[0] === '/') {
+                root = '/';
+                filepath = filepath.slice(1);
+            }
+            else if (filepath[1] === ':') {
+                root = filepath.slice(0, 3);
+                filepath = filepath.slice(3);
+            }
+            const folders = filepath.split('/').slice(0, -1);
+            folders.reduce(
+                (acc, folder) => {
+                    const folderPath = acc + folder + '/';
+                    if (!fs.existsSync(folderPath)) {
+                        fs.mkdirSync(folderPath);
+                    }
+                    return folderPath
+                },
+                root
+            );
+            fs.writeFileSync(root + filepath, content);
+            resolve(1)
+        } catch (error) {
+            reject(error)
+        }
+    })
+}
 
-const proc = (messageFull: any) => {
-    return new Promise<{ reply: string, from: ChatId }>(async (resolve, reject) => {
+const mediaProccess = (message: Message) => {
+    return new Promise<string>(async (resolve, reject) => {
+        try {
+            if (message.mimetype) {
+                const filename = `${message.t}.${mime.extension(message.mimetype)}`;
+                const mediaData = await decryptMedia(message);
+                const sender = validateRequestQuery(message.chatId, "num")
+                const locFile = path.join(`${appRoot}/../${sender}/${filename}`)
+                await writeFileSyncRecursive(locFile, mediaData)
+                resolve(`/${sender}/${filename}`)
+            }
+        } catch (error) {
+            reject(error)
+        }
+    })
+}
+
+const incomingMessage = (client: Client, messageFull: Message) => {
+    return new Promise<{ reply: string, from: ChatId, msgId: MessageId }>(async (resolve, reject) => {
         try {
             const caption = messageFull.caption
+            const msgId = messageFull.id
             const type = messageFull.type
             const body = messageFull.body
             const msg = type === "image" && caption ? caption : type === "chat" ? body : ""
+            let file = ""
+            if (messageFull.isMedia && messageFull.mimetype) {
+                await mediaProccess(messageFull).then((resp) => { file = resp })
+            }
             const base64Msg = Buffer.from(msg).toString("base64")
             const sender = validateRequestQuery(messageFull.from, "num")
             const fromId = messageFull.from
             const rcvdTime = moment().format("YYYY-MM-DD HH:mm:ss")
             const media = "300"
             let reply = ""
-            extraLog.info({ message: "Message incoming", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime } })
-            await axios.post("https://dev-apibigbabol.redboxdigital.id/api/v1/validasi", {
-                msisdn: sender,
-                mo_text: base64Msg,
-                media: media,
-                receive_at: rcvdTime
-            }).then((res) => {
-                reply = res.data.data.reply ? res.data.data.reply : ""
-                extraLog.info({ message: "Success", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime }, Response: { data: res.data } })
-            }).catch((err) => {
-                reply = "terjadi kesalahan pada system"
-                extraLog.error({ message: "Error", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime }, error: err })
-            })
+            if (msg != "") {
+                extraLog.info({ message: "Message incoming", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime } })
+                await axios.post("https://dev-apibigbabol.redboxdigital.id/api/v1/validasi", {
+                    msisdn: sender,
+                    mo_text: base64Msg,
+                    media: media,
+                    receive_at: rcvdTime,
+                    file
+                }).then((res) => {
+                    reply = res.data.data.reply ? res.data.data.reply : ""
+                    extraLog.info({ message: "Success", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime }, Response: { data: res.data } })
+                }).catch((err) => {
+                    reply = "terjadi kesalahan pada system"
+                    extraLog.error({ message: "Error", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime }, error: err })
+                })
+            } else {
+                await client.sendSeen(fromId)
+            }
             return resolve({
-                reply: reply, from: fromId
+                reply: reply, from: fromId, msgId: msgId
             })
         } catch (error) {
             reject(error)
@@ -49,32 +108,33 @@ const proc = (messageFull: any) => {
     })
 }
 
-function getRandomInt(min: number, max: number): number {
+const getRandomInt = (min: number, max: number): number => {
     min = Math.ceil(min);
     max = Math.floor(max);
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function sleep(ms: number) {
+const sleep = (ms: number) => {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-const sendText = (client: Client, message: string, senderId: ChatId) => {
+const replyChat = (client: Client, message: string, senderId: ChatId, msgId: MessageId) => {
     return new Promise(async (resolve, reject) => {
         try {
-            if (userId != senderId) {
-                timeout = getRandomInt(30000, 60000)
-            } else {
-                timeout = 0
+            if (message != "") {
+                if (userId != senderId) {
+                    timeout = getRandomInt(30000, 60000)
+                } else {
+                    timeout = 0
+                }
+                await sleep(timeout)
+                await client.sendSeen(senderId)
+                await client.simulateTyping(senderId, true)
+                userId = senderId
+                setTimeout(() => {
+                    return client.reply(senderId, message, msgId)
+                }, getRandomInt(5000, 10000));
             }
-            console.log(timeout)
-            await sleep(timeout)
-            await client.sendSeen(senderId)
-            await client.simulateTyping(senderId, true)
-            userId = senderId
-            setTimeout(() => {
-                return client.sendText(senderId, message)
-            }, getRandomInt(5000, 10000));
             return resolve(1)
         } catch (error) {
             reject(error)
@@ -82,11 +142,11 @@ const sendText = (client: Client, message: string, senderId: ChatId) => {
     })
 }
 
-const processMessage = (message: any) => {
-    return queue.add(() => proc(message), { priority: 0 })
+const incomingMessageQueue = (client: Client, message: any) => {
+    return queue.add(() => incomingMessage(client, message), { priority: 0 })
 };
 
-const incomingCall = (client: Client) => {
+const incomingCallHandle = (client: Client) => {
     return new Promise((resolve, reject) => {
         try {
             client.onIncomingCall(async call => {
@@ -99,8 +159,8 @@ const incomingCall = (client: Client) => {
     })
 }
 
-const proccessSendText = (clientId: Client, message: string, senderId: ChatId) => {
-    return queue.add(() => sendText(clientId, message, senderId), { priority: 1 })
+const sendTextQueue = (clientId: Client, message: string, senderId: ChatId, msgId: MessageId) => {
+    return queue.add(() => replyChat(clientId, message, senderId, msgId), { priority: 1 })
 }
 
 const start = (client: Client) => {
@@ -108,14 +168,14 @@ const start = (client: Client) => {
         try {
             const unreadMessages = await client.getAllUnreadMessages();
             unreadMessages.forEach(async (res) => {
-                const proccess = await processMessage(res)
-                await proccessSendText(client, proccess.reply, proccess.from)
+                const proccess = await incomingMessageQueue(client, res)
+                await sendTextQueue(client, proccess.reply, proccess.from, proccess.msgId)
             })
             await client.onMessage(async (res) => {
-                const proccess = await processMessage(res)
-                await proccessSendText(client, proccess.reply, proccess.from)
+                const proccess = await incomingMessageQueue(client, res)
+                await sendTextQueue(client, proccess.reply, proccess.from, proccess.msgId)
             });
-            await incomingCall(client)
+            await incomingCallHandle(client)
             queue.start();
         } catch (error) {
             reject(error)
@@ -123,9 +183,10 @@ const start = (client: Client) => {
     })
 }
 
-async function launch() {
+const launch = async () => {
     try {
         const client = await create({
+            sessionId: "SERXDCFGVHB8976543",
             useChrome: true,
             headless: true,
             autoRefresh: true,
