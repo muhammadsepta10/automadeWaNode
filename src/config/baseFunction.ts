@@ -1,17 +1,4 @@
-import connection from "../config/db"
 import moment from "moment"
-
-export const query = (sql: any, args: any) => {
-    return new Promise<any>((resolve, reject) => {
-        connection.query(sql, args, (err: any, rows: any) => {
-            if (err) {
-                return reject(err);
-            } else {
-                return resolve(rows);
-            }
-        });
-    });
-};
 
 export const randomString = async (length: number, chars: string, frontText: string) => {
     var result = `${frontText}`;
@@ -37,9 +24,9 @@ export const validateRequestQuery = (data: any, type: string) => {
                     data == "" ||
                     data == ","
                     ? ""
-                    : parseInt(data.toString().replace(/[^0-9\.]+/g, "")) == NaN
+                    : parseInt(data.toString().replace(/[^0-9]+/g, "")) == NaN
                         ? ""
-                        : data.toString().replace(/[^0-9\.]+/g, "");
+                        : data.toString().replace(/[^0-9]+/g, "");
             return clearData;
         case "char":
             clearData =
@@ -121,64 +108,6 @@ export const validateRequestQuery = (data: any, type: string) => {
             return clearData;
     }
 };
-
-export const parsingIdentity = (identity: string) => {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const clearIdentity = identity.replace(/\D/g, "")
-            if (clearIdentity.length != 16) {
-                resolve({
-                    identity: clearIdentity,
-                    idType: 0,
-                    province: 0,
-                    regency: 0,
-                    district: 0,
-                    gender: "",
-                    birthdate: "0000-00-00",
-                    age: 0
-                })
-            } else {
-                const codeAre = clearIdentity.substring(0, 6)
-                const codeProvince = clearIdentity.substring(0, 2)
-                const codeRegncy = clearIdentity.substring(0, 4)
-                const codeDistrict = clearIdentity.substring(0, 6)
-                const bornDate = parseInt(clearIdentity.substring(6, 8)) > 40 ? parseInt(clearIdentity.substring(6, 8)) - 40 : clearIdentity.substring(6, 8);
-                const gender = clearIdentity == "" ? "" : parseInt(clearIdentity.substring(6, 8)) > 40 ? "F" : parseInt(clearIdentity.substring(6, 8)) < 40 ? "M" : "";
-                const yearNow = String(new Date().getFullYear()).substring(2, 4);
-                const bornYear = parseInt(clearIdentity.substring(10, 12)) > parseInt(yearNow) ? 19 : 20;
-                const birthDate = clearIdentity.length < 16 || parseInt(clearIdentity.substring(8, 10)) > 12 || bornDate > 31 ? "0000-00-00" : bornYear + clearIdentity.substring(10, 12) + "-" + clearIdentity.substring(8, 10) + "-" + bornDate;
-                const ages = moment(birthDate, "YYYY").fromNow().replace(" years ago", "");
-                const age = ages === "Invalid date" ? "0" : ages.length > 2 ? "0" : birthDate == null ? "0" : ages;
-                const area: any = await query("SELECT province,regency,district FROM vw_code_ktp WHERE code= ?", [codeAre])
-                if (area.length < 1) {
-                    resolve({
-                        identity: clearIdentity,
-                        idType: 0,
-                        province: 0,
-                        regency: 0,
-                        district: 0,
-                        gender: gender,
-                        birthdate: birthDate,
-                        age: age
-                    })
-                } else {
-                    resolve({
-                        identity: clearIdentity,
-                        idType: 1,
-                        province: codeProvince,
-                        regency: codeRegncy,
-                        district: codeDistrict,
-                        gender: gender,
-                        birthdate: birthDate,
-                        age: age
-                    })
-                }
-            }
-        } catch (error) {
-            reject(error)
-        }
-    })
-}
 
 export const vlaidateHp = (hp: string) => {
     return new Promise((resolve, reject) => {
