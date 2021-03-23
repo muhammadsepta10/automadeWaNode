@@ -62,7 +62,7 @@ const mediaProccess = (message: Message) => {
                 const sender = validateRequestQuery(message.chatId, "num")
                 const locFile = path.join(`${appRoot}/../${sender}/${filename}`)
                 await writeFileSyncRecursive(locFile, mediaData)
-                return resolve(`${filename}`)
+                return resolve(`http://192.168.201.246/${sender}/${filename}`)
             }
         } catch (error) {
             reject(error)
@@ -78,30 +78,33 @@ const incomingMessage = (client: Client, messageFull: Message) => {
             const type = messageFull.type
             const body = messageFull.body
             const msg = type === "image" && caption ? caption : type === "chat" ? body : ""
-            // let file = ""
-            // if (messageFull.isMedia && messageFull.mimetype) {
-            //     await mediaProccess(messageFull).then((resp) => { file = resp })
-            // }
+            let file = ""
+            if (messageFull.isMedia && messageFull.mimetype) {
+                await mediaProccess(messageFull).then((resp) => { file = resp })
+            }
             const base64Msg = validateRequestQuery(Buffer.from(msg).toString("base64"), "numChar")
             const sender = validateRequestQuery(messageFull.from, "num")
             const fromId = messageFull.from
             const rcvdTime = moment().format("YYYY-MM-DD HH:mm:ss")
             const media = "300"
             let reply = ""
-            // console.log(file)
+            console.log(file)
             extraLog.info({ message: "Message incoming", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime } })
             await client.sendSeen(fromId)
             await client.simulateTyping(fromId, true)
-            await axios.post("https://beta-validation.gooddaymilyaranhadiah.com/api/v1/validasi", {
-                sender: (sender),
-                message: (base64Msg),
-                rcvd_time: (rcvdTime),
+            // set api
+            await axios.post("https://beta-apivalidasioreoresep.redboxdigital.id/api/v1/validasi", {
+                nomor_pengirim: (sender),
+                pesan: (base64Msg),
+                timestamp: (rcvdTime),
                 media: (media),
-                // photo: Buffer.from(file).toString("base64")
+                photo: Buffer.from(file).toString("base64")
+            }, {
+                headers: {
+                    "api-key": "roy",
+                    "api-user": "roy"
+                }
             }).then((res) => {
-                console.log("res data", res.data)
-                console.log("config data", res.config.data)
-                console.log("reply", res.data?.data?.reply)
                 reply = res.data?.data?.reply ? res.data.data.reply : res.data.message
                 extraLog.info({ message: "Success", data: { message: messageFull, sender: sender, chatId: fromId, rcvdTime: rcvdTime }, Response: { data: res.data } })
             }).catch((err) => {
