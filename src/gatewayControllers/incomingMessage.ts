@@ -31,7 +31,6 @@ const incomingMessage = (client: Client, messageFull: Message) => {
             if (messageFull.isMedia && messageFull.mimetype) {
                 await mediaProccess(messageFull).then((resp) => { file = resp })
             }
-            console.log(file)
             const base64Msg = validateRequestQuery(Buffer.from(msg).toString("base64"), "numChar")
             const sender = validateRequestQuery(messageFull.from, "num")
             const fromId = messageFull.from
