@@ -1,4 +1,56 @@
 import moment from "moment"
+import { decryptMedia, Message } from '@open-wa/wa-automate';
+import mime from "mime-types"
+import path from "path"
+import appRoot from "app-root-path"
+import fs from 'fs';
+import { google } from "googleapis"
+import { config } from "dotenv"
+config()
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || ""
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || ""
+const GOOGLE_ACCESS_TOKEN = process.env.GOOGLE_ACCESS_TOKEN || ""
+const GOOGLE_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN || ""
+const { OAuth2 } = google.auth
+const oAuth2Client = new OAuth2(
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET
+)
+oAuth2Client.setCredentials({
+    refresh_token: GOOGLE_REFRESH_TOKEN,
+    access_token: GOOGLE_ACCESS_TOKEN
+})
+const people = google.people({
+    version: "v1", auth: oAuth2Client
+})
+
+export const saveContact = (name: string, phoneNumber: string) => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const searchContact = await people.people.searchContacts({
+                query: phoneNumber,
+                readMask: "phoneNumbers"
+            })
+            const lengthContact = searchContact.data?.results ?? 0
+            if (lengthContact < 1) {
+                await people.people.createContact({
+                    requestBody: {
+                        names: [
+                            {
+                                displayName: name
+
+                            },
+                        ],
+                        phoneNumbers: [{ value: phoneNumber }]
+                    },
+                });
+            }
+            return resolve(true)
+        } catch (error) {
+            reject(error)
+        }
+    })
+}
 
 export const randomString = async (length: number, chars: string, frontText: string) => {
     var result = `${frontText}`;
@@ -205,4 +257,54 @@ export const getRandomInt = (min: number, max: number) => {
     min = Math.ceil(min);
     max = Math.floor(max);
     return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+export const writeFileSyncRecursive = (filename: string, content: any) => {
+    return new Promise((resolve, reject) => {
+        try {
+            let filepath = filename.replace(/\\/g, '/');
+            let root = '';
+            if (filepath[0] === '/') {
+                root = '/';
+                filepath = filepath.slice(1);
+            }
+            else if (filepath[1] === ':') {
+                root = filepath.slice(0, 3);
+                filepath = filepath.slice(3);
+            }
+            const folders = filepath.split('/').slice(0, -1);
+            folders.reduce(
+                (acc, folder) => {
+                    const folderPath = acc + folder + '/';
+                    if (!fs.existsSync(folderPath)) {
+                        fs.mkdirSync(folderPath);
+                    }
+                    return folderPath
+                },
+                root
+            );
+            fs.writeFileSync(root + filepath, content);
+            resolve(1)
+        } catch (error) {
+            reject(error)
+        }
+    })
+}
+
+
+export const mediaProccess = (message: Message) => {
+    return new Promise<string>(async (resolve, reject) => {
+        try {
+            if (message.mimetype) {
+                const filename = `${message.t}.${mime.extension(message.mimetype)}`;
+                const mediaData = await decryptMedia(message);
+                const sender = validateRequestQuery(message.from, "num") == "" ? moment().format("YYYYMMDDHHmmss") : validateRequestQuery(message.from, "num")
+                const locFile = path.join(`${appRoot}/media/${sender}/${filename}`)
+                await writeFileSyncRecursive(locFile, mediaData)
+                return resolve(`${filename}`)
+            }
+        } catch (error) {
+            reject(error)
+        }
+    })
 }
